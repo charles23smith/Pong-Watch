@@ -10,37 +10,38 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 RTC_DS3231 rtc;
 
+// ======================
+// --- IMU Variables ----
+// ======================
 float x, y, z;
-bool showTime = true;
+bool showTime = true;   // Toggle between Time Mode and Game Mode
 
-// --- Paddle + ball constants ---
-const uint8_t PADDLE_HEIGHT = 10;   // smaller paddle = stricter threshold
+// ======================
+// --- PONG CONSTANTS ---
+// ======================
+const uint8_t PADDLE_HEIGHT = 10;
 const uint8_t PADDLE_WIDTH  = 3;
 const uint8_t BALL_RADIUS   = 2;
 
-// Pong objects
 int paddleLeftY  = 20;
 int paddleRightY = 20;
 int ballX = SCREEN_WIDTH / 2;
 int ballY = SCREEN_HEIGHT / 2;
 int ballDX = 1, ballDY = 1;
 
-// Game state
 int score = 0;
 int lives = 3;
 
-// ---- PONG HELPERS ----
-
+// =====================================================================
+//                             GAME HELPERS
+// =====================================================================
 void resetBallAndPaddles() {
-  // Center the ball
   ballX = SCREEN_WIDTH / 2;
   ballY = SCREEN_HEIGHT / 2;
 
-  // Random-ish starting direction
   do { ballDX = random(-1, 2); } while (ballDX == 0);
   do { ballDY = random(-1, 2); } while (ballDY == 0);
 
-  // Random starting paddle positions (stay fully on-screen)
   paddleLeftY  = random(0, SCREEN_HEIGHT - PADDLE_HEIGHT);
   paddleRightY = random(0, SCREEN_HEIGHT - PADDLE_HEIGHT);
 }
@@ -80,11 +81,10 @@ void showGameOverScreen() {
   display.display();
 }
 
-// Draw pong field + HUD
+// Draw everything for pong mode
 void drawPong() {
   display.clearDisplay();
 
-  // HUD
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
@@ -95,11 +95,9 @@ void drawPong() {
   display.print("Lives:");
   display.print(lives);
 
-  // Paddles
   display.fillRect(2, paddleLeftY, PADDLE_WIDTH, PADDLE_HEIGHT, SSD1306_WHITE);
   display.fillRect(SCREEN_WIDTH - 5, paddleRightY, PADDLE_WIDTH, PADDLE_HEIGHT, SSD1306_WHITE);
 
-  // Ball
   display.fillCircle(ballX, ballY, BALL_RADIUS, SSD1306_WHITE);
 
   display.display();
@@ -107,21 +105,15 @@ void drawPong() {
 
 /**
  * updateBall()
- *  - uses newX/newY like your CPU sketch
- *  - stricter hitbox using PADDLE_HEIGHT (smaller than before)
- *  - returns:
- *      0 -> normal play
- *      1 -> ball went out of bounds (life lost)
+ * Handles collisions + scoring
  */
 int updateBall() {
-  // Predict new position
   int newX = ballX + ballDX;
   int newY = ballY + ballDY;
 
-  // Top / bottom collisions
   if (newY <= 0 || newY >= SCREEN_HEIGHT - 1) {
     ballDY = -ballDY;
-    newY += ballDY * 2;  // nudge back inside
+    newY += ballDY * 2;
   }
 
   const int LEFT_PADDLE_FRONT = 5;
@@ -130,7 +122,7 @@ int updateBall() {
       newY <= paddleLeftY + PADDLE_HEIGHT) {
     ballDX = -ballDX;
     newX = LEFT_PADDLE_FRONT;
-    score++;  // hit
+    score++;
   }
 
   const int RIGHT_PADDLE_FRONT = SCREEN_WIDTH - 5;
@@ -139,35 +131,36 @@ int updateBall() {
       newY <= paddleRightY + PADDLE_HEIGHT) {
     ballDX = -ballDX;
     newX = RIGHT_PADDLE_FRONT;
-    score++;  // hit
+    score++;
   }
 
   if (newX <= 0 || newX >= SCREEN_WIDTH - 1) {
-    return 1;  // life lost
+    return 1;
   }
 
-  // Commit move
   ballX = newX;
   ballY = newY;
 
   return 0;
 }
 
+// =====================================================================
+//                               SETUP
+// =====================================================================
 void setup() {
   delay(500);
   Serial.begin(9600);
   delay(200);
 
-  pinMode(2, INPUT_PULLUP); 
+  pinMode(2, INPUT_PULLUP); // Toggle button
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     while (1);
   }
   display.clearDisplay();
-  display.setTextSize(2);
-  display.setTextColor(SSD1306_WHITE);
 
   if (!IMU.begin()) {
+    Serial.println("IMU not found");
     while (1);
   }
 
@@ -176,83 +169,103 @@ void setup() {
     while (1);
   }
 
-  // Uncomment ONCE to sync RTC to compile time, then comment again.
+  // Use this ONCE to set time, then comment it out
   // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 
   randomSeed(analogRead(0));
   resetBallAndPaddles();
+
+  display.setTextSize(2);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(20, 25);
+  display.print("Watch Ready");
+  display.display();
+  delay(1200);
 }
 
+// =====================================================================
+//                                 LOOP
+// =====================================================================
 void loop() {
-  // Toggle between Time mode and Pong mode
+
+  // -------------------------------
+  // Toggle between Time / Pong
+  // -------------------------------
   if (digitalRead(2) == LOW) {
     showTime = !showTime;
-    delay(250); // debounce
+    delay(250);
   }
 
-  // ----- TIME MODE -----
+  // ================================================================
+  //                            CLOCK MODE
+  // ================================================================
   if (showTime) {
     DateTime now = rtc.now();
 
-    int hrs = now.hour();
-    int mins = now.minute();
-    int secs = now.second();
-
     display.clearDisplay();
-    display.setCursor(0, 20);
 
-    if (hrs < 10) display.print('0');
-    display.print(hrs);
+    // DATE
+    display.setTextSize(1);
+    display.setCursor(22, 8);
+    display.print(now.month());
+    display.print("/");
+    display.print(now.day());
+    display.print("/");
+    display.print(now.year());
+
+    // TIME
+    display.setTextSize(2);
+    display.setCursor(10, 28);
+
+    if (now.hour() < 10) display.print("0");
+    display.print(now.hour());
     display.print(":");
-
-    if (mins < 10) display.print('0');
-    display.print(mins);
+    if (now.minute() < 10) display.print("0");
+    display.print(now.minute());
     display.print(":");
-
-    if (secs < 10) display.print('0');
-    display.print(secs);
+    if (now.second() < 10) display.print("0");
+    display.print(now.second());
 
     display.display();
     delay(200);
+    return;
   }
 
-  // ----- PONG MODE -----
-  else {
-    int result = updateBall();
+  // ================================================================
+  //                           PONG MODE
+  // ================================================================
+  int result = updateBall();
 
-    if (result == 1) {  // life lost
-      lives--;
-      showLifeLostScreen();
+  if (result == 1) {
+    lives--;
+    showLifeLostScreen();
 
-      if (lives <= 0) {
-        showGameOverScreen();
-        while (1) { } // freeze on game over
-      }
-
-      resetBallAndPaddles();
+    if (lives <= 0) {
+      showGameOverScreen();
+      while (1);
     }
 
-    // Draw updated frame
-    drawPong();
-
-    // IMU-controlled paddles
-    if (IMU.accelerationAvailable()) {
-      IMU.readAcceleration(x, y, z);
-
-      float pitch = atan2(x, sqrt(y * y + z * z)) * 180.0 / PI;
-      float roll  = atan2(y, sqrt(x * x + z * z)) * 180.0 / PI;
-
-      if (roll > 50)  paddleLeftY  -= 2;
-      if (roll < -50) paddleLeftY  += 2;
-
-      if (pitch > 50)  paddleRightY -= 2;
-      if (pitch < -50) paddleRightY += 2;
-
-      // Constrain using PADDLE_HEIGHT
-      paddleLeftY  = constrain(paddleLeftY, 0, SCREEN_HEIGHT - PADDLE_HEIGHT);
-      paddleRightY = constrain(paddleRightY, 0, SCREEN_HEIGHT - PADDLE_HEIGHT);
-    }
-
-    delay(30);
+    resetBallAndPaddles();
   }
+
+  drawPong();
+
+  // IMU control for paddles
+  if (IMU.accelerationAvailable()) {
+    IMU.readAcceleration(x, y, z);
+
+    float pitch = atan2(x, sqrt(y*y + z*z)) * 180.0 / PI;
+    float roll  = atan2(y, sqrt(x*x + z*z)) * 180.0 / PI;
+
+    if (roll > 50)  paddleLeftY  -= 2;
+    if (roll < -50) paddleLeftY  += 2;
+
+    if (pitch > 50)  paddleRightY -= 2;
+    if (pitch < -50) paddleRightY += 2;
+
+    paddleLeftY  = constrain(paddleLeftY, 0, SCREEN_HEIGHT - PADDLE_HEIGHT);
+    paddleRightY = constrain(paddleRightY, 0, SCREEN_HEIGHT - PADDLE_HEIGHT);
+  }
+
+  delay(30);
 }
