@@ -1,6 +1,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Arduino_LSM6DS3.h>
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -21,7 +22,7 @@ int   figureDir = 1;
 
 uint8_t gearLevel = 0;
 
-float speedForSize[ MAX_SIZE + 1 ] = {
+float speedForSize[MAX_SIZE + 1] = {
   0.0f,
   0.4f,
   0.6f,
@@ -33,7 +34,29 @@ float speedForSize[ MAX_SIZE + 1 ] = {
 unsigned long lastUpdate = 0;
 const unsigned long FRAME_RATE = 50;
 
-bool lastButtonState = HIGH;
+int stepCount = 0;
+int totalSteps = 0;
+const int STEPS_PER_STAGE = 5;
+
+float stepThreshold = 1.35;
+unsigned long lastStepTime = 0;
+const unsigned long STEP_COOLDOWN = 350;
+
+void detectSteps() {
+  float x, y, z;
+  if (IMU.accelerationAvailable()) {
+    IMU.readAcceleration(x, y, z);
+    float mag = sqrt(x*x + y*y + z*z);
+    if (mag > stepThreshold) {
+      unsigned long now = millis();
+      if (now - lastStepTime > STEP_COOLDOWN) {
+        stepCount++;
+        totalSteps++;
+        lastStepTime = now;
+      }
+    }
+  }
+}
 
 void drawGrass() {
   display.drawLine(0, GROUND_Y, SCREEN_WIDTH - 1, GROUND_Y, SSD1306_WHITE);
@@ -132,6 +155,7 @@ int figureMargin(uint8_t scale) {
 
 void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
+  IMU.begin();
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     while (1);
@@ -152,8 +176,10 @@ void setup() {
 }
 
 void loop() {
-  bool buttonPressed = (digitalRead(BUTTON_PIN) == LOW);
-  if (lastButtonState == HIGH && buttonPressed == LOW) {
+  detectSteps();
+
+  if (stepCount >= STEPS_PER_STAGE) {
+    stepCount = 0;
     sizeLevel++;
     if (sizeLevel > MAX_SIZE) {
       sizeLevel = MIN_SIZE;
@@ -162,12 +188,9 @@ void loop() {
       figureDir = 1;
     }
   }
-  lastButtonState = buttonPressed;
 
   unsigned long now = millis();
-  if (now - lastUpdate < FRAME_RATE) {
-    return;
-  }
+  if (now - lastUpdate < FRAME_RATE) return;
   lastUpdate = now;
 
   float speed = speedForSize[sizeLevel];
@@ -194,6 +217,9 @@ void loop() {
   display.setCursor(55, 0);
   display.print("Gear:");
   display.print(gearLevel);
+
+  display.setCursor(100, 0);
+  display.print(totalSteps % 10);
 
   drawGrass();
   drawStickFigureOnGround((int)(figureX + 0.5f), sizeLevel, gearLevel);
