@@ -213,19 +213,31 @@ void loop() {
     display.print("/");
     display.print(now.year());
 
-    // TIME
-    display.setTextSize(2);
-    display.setCursor(10, 28);
+    // ====== 12-HOUR TIME WITH AM/PM THAT FITS ON ONE LINE ======
+    int hour12 = now.hour() % 12;
+    if (hour12 == 0) hour12 = 12;
 
-    if (now.hour() < 10) display.print("0");
-    display.print(now.hour());
+    // Draw the main time in size 2
+    display.setTextSize(2);
+    display.setCursor(0, 28);
+
+    // Hour (no leading zero)
+    display.print(hour12);
     display.print(":");
+
+    // Minute
     if (now.minute() < 10) display.print("0");
     display.print(now.minute());
     display.print(":");
+
+    // Second
     if (now.second() < 10) display.print("0");
     display.print(now.second());
 
+    // Switch to smaller font for AM/PM
+    display.setTextSize(1);
+    display.print(" ");
+    display.print(now.hour() < 12 ? "AM" : "PM");
     display.display();
     delay(200);
     return;
