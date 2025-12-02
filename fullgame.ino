@@ -1,123 +1,127 @@
+#include <Arduino_LSM6DS3.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <Arduino_LSM6DS3.h>
-#include <RTClib.h>
+#include "RTClib.h"
 
+// ======================
+// --- OLED SETTINGS ----
+// ======================
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
+#define OLED_ADDR 0x3C
+#define OLED_RST 4
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST);
+
+// ======================
+// ------- RTC ----------
+// ======================
 RTC_DS3231 rtc;
 
+// ======================
+// ---- IMU SETTINGS -----
+// ======================
 float x, y, z;
-bool showTime = true;
+const float DEAD_ZONE = 50;   // sensitivity threshold
 
-// Pong objects
-int paddleLeftY = 20;
-int paddleRightY = 20;
-int ballX = 64, ballY = 32;
-int ballDX = 1, ballDY = 1;
-
-void drawPong() {
-  display.clearDisplay();
-  display.fillRect(2, paddleLeftY, 3, 15, SSD1306_WHITE);
-  display.fillRect(123, paddleRightY, 3, 15, SSD1306_WHITE);
-  display.fillCircle(ballX, ballY, 2, SSD1306_WHITE);
-  display.display();
-}
-
-void updateBall() {
-  ballX += ballDX;
-  ballY += ballDY;
-
-  if (ballY <= 0 || ballY >= 63) ballDY = -ballDY;
-  if (ballX <= 5 || ballX >= 123) ballDX = -ballDX;
-}
-
+// =====================================================
+// SETUP
+// =====================================================
 void setup() {
-  delay(500);
   Serial.begin(9600);
+  while (!Serial);
+
+  // --- I2C + OLED ---
+  Wire.begin();
+  Wire.setClock(100000);
   delay(200);
 
-  pinMode(2, INPUT_PULLUP);
-
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    while (1);
-  }
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setTextColor(SSD1306_WHITE);
-
-  if (!IMU.begin()) {
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    Serial.println("SSD1306 allocation failed");
     while (1);
   }
 
-  // -------- RTC ENABLED --------
+  // --- RTC INIT ---
   if (!rtc.begin()) {
-    Serial.println("RTC not found");
+    Serial.println("Couldn't find RTC");
     while (1);
   }
 
-  // Uncomment once to sync RTC to code compile time:
-  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  // Uncomment ONCE to set current time, upload, then comment again:
+  // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+
+  // --- IMU INIT ---
+  if (!IMU.begin()) {
+    Serial.println("Failed to initialize IMU!");
+    while (1);
+  }
+  Serial.println("IMU ready.");
+
+  // Startup screen
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(20, 25);
+  display.println("Watch Ready");
+  display.display();
+  delay(1000);
 }
 
+// =====================================================
+// LOOP
+// =====================================================
 void loop() {
+  // =============================
+  // 1. Read RTC and draw clock
+  // =============================
+  DateTime now = rtc.now();
 
-  if (digitalRead(2) == LOW) {
-    showTime = !showTime;
-    delay(250);
-  }
+  display.clearDisplay();
 
-  // TIME MODE (RTC)
-  if (showTime) {
-    DateTime now = rtc.now();   // <-- Read RTC time
+  // --- DATE ---
+  display.setTextSize(1);
+  display.setCursor(22, 8);
+  display.print(now.month());
+  display.print("/");
+  display.print(now.day());
+  display.print("/");
+  display.print(now.year());
 
-    int hrs = now.hour();
-    int mins = now.minute();
-    int secs = now.second();
+  // --- TIME ---
+  display.setTextSize(2);
+  display.setCursor(10, 28);
 
-    display.clearDisplay();
-    display.setCursor(0, 20);
+  if (now.hour() < 10) display.print("0");
+  display.print(now.hour());
+  display.print(":");
+  if (now.minute() < 10) display.print("0");
+  display.print(now.minute());
+  display.print(":");
+  if (now.second() < 10) display.print("0");
+  display.print(now.second());
 
-    // Print HH:MM:SS with zero padding
-    if (hrs < 10) display.print('0');
-    display.print(hrs);
-    display.print(":");
+  display.display();
 
-    if (mins < 10) display.print('0');
-    display.print(mins);
-    display.print(":");
+  // =============================
+  // 2. IMU Tilt Detection
+  // =============================
+  if (IMU.accelerationAvailable()) {
+    IMU.readAcceleration(x, y, z);
 
-    if (secs < 10) display.print('0');
-    display.print(secs);
+    float pitch = atan2(x, sqrt(y*y + z*z)) * 180.0 / PI;
+    float roll  = atan2(y, sqrt(x*x + z*z)) * 180.0 / PI;
 
-    display.display();
-    delay(200);
-  }
-
-  // PONG MODE
-  else {
-    updateBall();
-    drawPong();
-
-    if (IMU.accelerationAvailable()) {
-      IMU.readAcceleration(x, y, z);
-
-      float pitch = atan2(x, sqrt(y*y + z*z)) * 180.0 / PI;
-      float roll  = atan2(y, sqrt(x*x + z*z)) * 180.0 / PI;
-
-      if (roll > 50) paddleLeftY -= 2;
-      if (roll < -50) paddleLeftY += 2;
-
-      if (pitch > 50) paddleRightY -= 2;
-      if (pitch < -50) paddleRightY += 2;
-
-      paddleLeftY = constrain(paddleLeftY, 0, 48);
-      paddleRightY = constrain(paddleRightY, 0, 48);
+    if (abs(roll) >= DEAD_ZONE) {
+      if (roll > DEAD_ZONE)  Serial.println("Left board down");
+      if (roll < -DEAD_ZONE) Serial.println("Left board up");
     }
 
-    delay(30);
+    if (abs(pitch) >= DEAD_ZONE) {
+      if (pitch > DEAD_ZONE)  Serial.println("Right board up");
+      if (pitch < -DEAD_ZONE) Serial.println("Right board down");
+    }
   }
+
+  delay(200);
 }
