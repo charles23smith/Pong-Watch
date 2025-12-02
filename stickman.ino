@@ -10,7 +10,6 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 #define BUTTON_PIN 2
-
 const int GROUND_Y = SCREEN_HEIGHT - 5;
 
 const uint8_t MIN_SIZE = 1;
@@ -21,6 +20,7 @@ float figureX = SCREEN_WIDTH / 2.0f;
 int   figureDir = 1;
 
 uint8_t gearLevel = 0;
+int fullRotations = 0;
 
 float speedForSize[MAX_SIZE + 1] = {
   0.0f,
@@ -35,12 +35,20 @@ unsigned long lastUpdate = 0;
 const unsigned long FRAME_RATE = 50;
 
 int stepCount = 0;
-int totalSteps = 0;
 const int STEPS_PER_STAGE = 5;
 
 float stepThreshold = 1.35;
 unsigned long lastStepTime = 0;
 const unsigned long STEP_COOLDOWN = 350;
+
+float targetX = SCREEN_WIDTH / 2;
+float walkPhase = 0.0f;
+
+bool isWaiting = false;
+unsigned long waitUntil = 0;
+
+bool backAndForthMode = false;
+unsigned long modeUntil = 0;
 
 void detectSteps() {
   float x, y, z;
@@ -51,7 +59,6 @@ void detectSteps() {
       unsigned long now = millis();
       if (now - lastStepTime > STEP_COOLDOWN) {
         stepCount++;
-        totalSteps++;
         lastStepTime = now;
       }
     }
@@ -97,16 +104,20 @@ void drawStickFigureOnGround(int x, uint8_t scale, uint8_t gearLevel) {
   int legLen  = 4 * scale;
   int armLen  = 4 * scale;
 
+  float swing = sin(walkPhase) * (2 * scale);
+  int swayX = (int)(sin(walkPhase * 0.5f) * 1);
+  x += swayX;
+
   int bodyBottom   = GROUND_Y - 1;
   int bodyTop      = bodyBottom - bodyLen;
   int headCenterY  = bodyTop - headR;
 
+  int armY = bodyTop + bodyLen / 3;
+  int rightHandX = x + armLen + swing;
+  int leftHandX  = x - armLen - swing;
+
   display.drawCircle(x, headCenterY, headR, SSD1306_WHITE);
   display.drawLine(x, bodyTop, x, bodyBottom, SSD1306_WHITE);
-
-  int armY = bodyTop + bodyLen / 3;
-  int rightHandX = x + armLen;
-  int leftHandX  = x - armLen;
 
   display.drawLine(x, armY, leftHandX,  armY + scale, SSD1306_WHITE);
   display.drawLine(x, armY, rightHandX, armY + scale, SSD1306_WHITE);
@@ -173,6 +184,8 @@ void setup() {
   figureDir = 1;
   gearLevel = 0;
   sizeLevel = MIN_SIZE;
+
+  targetX = random(15, SCREEN_WIDTH - 15);
 }
 
 void loop() {
@@ -183,6 +196,7 @@ void loop() {
     sizeLevel++;
     if (sizeLevel > MAX_SIZE) {
       sizeLevel = MIN_SIZE;
+      fullRotations++;
       gearLevel = (gearLevel + 1) % 5;
       figureX   = SCREEN_WIDTH / 2.0f;
       figureDir = 1;
@@ -194,16 +208,41 @@ void loop() {
   lastUpdate = now;
 
   float speed = speedForSize[sizeLevel];
+  walkPhase += 0.15f * speed;
 
-  int margin = figureMargin(sizeLevel);
-  figureX += figureDir * speed;
+  if (backAndForthMode) {
+    if (millis() > modeUntil) {
+      backAndForthMode = false;
+      targetX = random(15, SCREEN_WIDTH - 15);
+    }
+  }
 
-  if (figureX >= SCREEN_WIDTH - margin) {
-    figureX = SCREEN_WIDTH - margin;
-    figureDir = -figureDir;
-  } else if (figureX <= margin) {
-    figureX = margin;
-    figureDir = -figureDir;
+  if (isWaiting) {
+    if (millis() >= waitUntil) {
+      isWaiting = false;
+      if (random(0, 10) == 0) {
+        backAndForthMode = true;
+        modeUntil = millis() + random(2000, 5000);
+      } else {
+        targetX = random(15, SCREEN_WIDTH - 15);
+      }
+    }
+  } else {
+    if (backAndForthMode) {
+      int margin = figureMargin(sizeLevel);
+      figureX += figureDir * speed;
+      if (figureX >= SCREEN_WIDTH - margin || figureX <= margin) {
+        figureDir = -figureDir;
+      }
+    } else {
+      if (abs(figureX - targetX) < 1.5f) {
+        isWaiting = true;
+        waitUntil = millis() + random(1200, 3500);
+      } else {
+        figureDir = (figureX < targetX) ? 1 : -1;
+        figureX += figureDir * speed;
+      }
+    }
   }
 
   display.clearDisplay();
@@ -211,15 +250,8 @@ void loop() {
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  display.print("Size:");
-  display.print(sizeLevel);
-
-  display.setCursor(55, 0);
-  display.print("Gear:");
-  display.print(gearLevel);
-
-  display.setCursor(100, 0);
-  display.print(totalSteps % 10);
+  display.print("Score:");
+  display.print(fullRotations);
 
   drawGrass();
   drawStickFigureOnGround((int)(figureX + 0.5f), sizeLevel, gearLevel);
